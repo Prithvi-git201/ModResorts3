@@ -39,6 +39,13 @@ import javax.naming.InitialContext;
 import javax.naming.NamingException;
 import javax.servlet.annotation.WebServlet;
 
+// Azure Key Vault + Managed Identity imports (cr-java-0113)
+import com.azure.identity.DefaultAzureCredentialBuilder;
+import com.azure.security.keyvault.secrets.SecretClient;
+import com.azure.security.keyvault.secrets.SecretClientBuilder;
+import com.azure.security.keyvault.secrets.models.KeyVaultSecret;
+import com.azure.core.exception.ResourceNotFoundException;
+
 @WebServlet({ "/resorts/weather" })
 public class WeatherServlet extends HttpServlet {
   private static final long serialVersionUID = 1L;
@@ -46,14 +53,22 @@ public class WeatherServlet extends HttpServlet {
   @Inject
   private ModResortsCustomerInformation customerInfo;
 
-  // local OS environment variable key name. The key value should provide an API
-  // key that will be used to
-  // get weather information from site: http://www.wunderground.com
-  private static final String WEATHER_API_KEY = "WEATHER_API_KEY";
+  // Azure Key Vault secret name for the Weather API key (cr-java-0113).
+  // The actual secret value is stored in Azure Key Vault and retrieved at
+  // runtime via Managed Identity – it is never embedded in source code.
+  private static final String WEATHER_API_KEY_SECRET_NAME = "WEATHER-API-KEY";
+
+  // Environment variable that holds the Azure Key Vault URI, e.g.
+  // https://<vault-name>.vault.azure.net/
+  private static final String KEY_VAULT_URI_ENV = "AZURE_KEY_VAULT_URI";
 
   private static final Logger logger = Logger.getLogger(WeatherServlet.class.getName());
 
   private static InitialContext context;
+
+  // Azure Key Vault SecretClient – uses DefaultAzureCredential (Managed Identity
+  // in Azure, env-based credentials locally) so no credentials are hard-coded.
+  private SecretClient secretClient;
 
   MBeanServer server;
   ObjectName weatherON;
@@ -76,6 +91,21 @@ public class WeatherServlet extends HttpServlet {
       e.printStackTrace();
     }
     context = setInitialContextProps();
+
+    // Initialise the Azure Key Vault SecretClient using Managed Identity (cr-java-0113).
+    // The vault URI is supplied via the AZURE_KEY_VAULT_URI environment variable so
+    // no credentials or vault addresses are hard-coded in source.
+    String keyVaultUri = System.getenv(KEY_VAULT_URI_ENV);
+    if (keyVaultUri != null && !keyVaultUri.trim().isEmpty()) {
+      secretClient = new SecretClientBuilder()
+          .vaultUrl(keyVaultUri)
+          .credential(new DefaultAzureCredentialBuilder().build())
+          .buildClient();
+      logger.info("Azure Key Vault SecretClient initialised for vault: " + keyVaultUri);
+    } else {
+      logger.warning("Environment variable " + KEY_VAULT_URI_ENV + " is not set. "
+          + "Weather API key will not be retrieved from Azure Key Vault.");
+    }
   }
 
   @Override
@@ -106,7 +136,9 @@ public class WeatherServlet extends HttpServlet {
     String city = request.getParameter("selectedCity");
     logger.log(Level.FINE, "requested city is " + city);
 
-    String weatherAPIKey = System.getenv(WEATHER_API_KEY);
+    // Retrieve the Weather API key from Azure Key Vault via Managed Identity
+    // (cr-java-0113). The secret is never stored in source code or property files.
+    String weatherAPIKey = getWeatherApiKeyFromKeyVault();
     String mockedKey = mockKey(weatherAPIKey);
     logger.log(Level.FINE, "weatherAPIKey is " + mockedKey);
 
@@ -117,6 +149,33 @@ public class WeatherServlet extends HttpServlet {
       logger.info(
           "weatherAPIKey is not found, will provide the weather data dated August 10th, 2018 for the city " + city);
       getDefaultWeatherData(city, response);
+    }
+  }
+
+  /**
+   * Retrieves the Weather API key from Azure Key Vault using Managed Identity
+   * (cr-java-0113). Falls back to {@code null} if the Key Vault client is not
+   * configured or the secret cannot be found, allowing the servlet to serve
+   * default weather data gracefully.
+   *
+   * @return the API key string, or {@code null} if unavailable
+   */
+  private String getWeatherApiKeyFromKeyVault() {
+    if (secretClient == null) {
+      logger.warning("Azure Key Vault SecretClient is not initialised. "
+          + "Ensure " + KEY_VAULT_URI_ENV + " is set and Managed Identity is configured.");
+      return null;
+    }
+    try {
+      KeyVaultSecret secret = secretClient.getSecret(WEATHER_API_KEY_SECRET_NAME);
+      return secret.getValue();
+    } catch (ResourceNotFoundException e) {
+      logger.warning("Secret '" + WEATHER_API_KEY_SECRET_NAME + "' not found in Azure Key Vault: " + e.getMessage());
+      return null;
+    } catch (Exception e) {
+      logger.log(Level.WARNING, "Failed to retrieve secret '" + WEATHER_API_KEY_SECRET_NAME
+          + "' from Azure Key Vault: " + e.getMessage(), e);
+      return null;
     }
   }
 

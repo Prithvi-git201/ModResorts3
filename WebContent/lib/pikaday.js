@@ -4,6 +4,29 @@
  * Copyright © 2014 David Bushell | BSD & MIT license | https://github.com/Pikaday/Pikaday
  */
 
+(function () {
+    'use strict';
+    // Azure Application Insights structured error logging utility
+    // Logs errors to Azure Application Insights when available, falls back to console.error
+    window.__azureAppInsightsLogError = function (context, error) {
+        var errorMessage = (error && (error.message || String(error))) || 'Unknown error';
+        var payload = {
+            severityLevel: 3, // SeverityLevel.Error
+            properties: {
+                context: context,
+                errorMessage: errorMessage,
+                errorStack: (error && error.stack) || '',
+                timestamp: new Date().toISOString()
+            }
+        };
+        if (window.appInsights && typeof window.appInsights.trackException === 'function') {
+            window.appInsights.trackException({ exception: error instanceof Error ? error : new Error(errorMessage), properties: payload.properties });
+        } else {
+            console.error('[AzureAppInsights]', JSON.stringify(payload));
+        }
+    };
+}());
+
 (function (root, factory)
 {
     'use strict';
@@ -12,7 +35,9 @@
     if (typeof exports === 'object') {
         // CommonJS module
         // Load moment.js as an optional dependency
-        try { moment = require('moment'); } catch (e) {}
+        try { moment = require('moment'); } catch (e) {
+            window.__azureAppInsightsLogError('Pikaday: Failed to load optional dependency moment.js (CommonJS)', e);
+        }
         module.exports = factory(moment);
     } else if (typeof define === 'function' && define.amd) {
         // AMD. Register as an anonymous module.
@@ -20,7 +45,9 @@
         {
             // Load moment.js as an optional dependency
             var id = 'moment';
-            try { moment = req(id); } catch (e) {}
+            try { moment = req(id); } catch (e) {
+                window.__azureAppInsightsLogError('Pikaday: Failed to load optional dependency moment.js (AMD)', e);
+            }
             return factory(moment);
         });
     } else {

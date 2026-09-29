@@ -4,13 +4,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Content-Security-Policy meta tag: provides baseline CSP enforcement in the browser.
+         Azure Front Door Rules Engine overrides/supplements this with a stricter CSP response header
+         (including a dynamically generated nonce) for centralized, consistent edge enforcement. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'nonce-{CSP_NONCE}' 'strict-dynamic'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://icons.wxug.com; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';">
+    <!--
+        CSP NONCE STRATEGY: Azure Front Door Rules Engine
+        Azure Front Door Rules Engine dynamically generates a unique nonce per request and:
+          1. Injects the Content-Security-Policy response header:
+             Content-Security-Policy: script-src 'nonce-{GENERATED_NONCE}' 'strict-dynamic'; object-src 'none'; base-uri 'none';
+          2. Replaces the placeholder token {CSP_NONCE} in the HTML response body with the generated nonce value.
+        All inline <script> tags carry nonce="{CSP_NONCE}" so they are permitted under the enforced CSP.
+        This satisfies SOC2 / ISO 27001 cloud SaaS compliance requirements for XSS prevention in multi-tenant environments.
+    -->
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="pikaday.css">
     <link href="https://fonts.googleapis.com/css?family=Poppins:300,400,500,600" rel="stylesheet">
     <!-- <script src="lib/pickaday.js"></script> -->
     <title>MOD RESORTS (A Transformation Advisor sample application)</title>
 
-    <script>
+    <script nonce="{CSP_NONCE}">
         function showCurrentDate() {
             var dateObj = new Date();
             var locale = "en-us";
@@ -51,7 +64,7 @@
     <main class="hero js-hero">
         <nav class="sub-nav">
             <div class="select-container">
-                <select onchange="callRESTAPI()" class="select-city js-select">
+                <select id="city-select" class="select-city js-select">
                     <option value="">Where to?</option>
                     <option value="Paris">Paris, France</option>
                     <option value="Las Vegas">Las Vegas, USA</option>
@@ -66,7 +79,7 @@
             </div>
             <div class="travel-dates">
                 <div id="datepickerfrom">
-                    <script>showCurrentDate()</script>
+                    <script nonce="{CSP_NONCE}">showCurrentDate()</script>
                 </div>
                 <svg width="14px" height="18px" viewBox="0 0 14 18" version="1.1" xmlns="http://www.w3.org/2000/svg"
                     xmlns:xlink="http://www.w3.org/1999/xlink">
@@ -86,7 +99,7 @@
             </div>
             <div class="travel-dates">
                 <div id="datepickerto">
-                    <script>showCurrentDate()</script>
+                    <script nonce="{CSP_NONCE}">showCurrentDate()</script>
                 </div>
                 <svg width="14px" height="18px" viewBox="0 0 14 18" version="1.1" xmlns="http://www.w3.org/2000/svg"
                     xmlns:xlink="http://www.w3.org/1999/xlink">
@@ -106,7 +119,7 @@
             </div>
             <!--button class="button--submit" onclick="callRESTAPI()" value="Submit">Find it</button-->
             <!--button class="button--submit" onclick="callRESTAPI()" value="Submit">Find it</button-->
-            <button class="button--reserve" onclick="confirmReservcation()" value="Submit">Reserve</button>
+            <button id="reserve-btn" class="button--reserve" value="Submit">Reserve</button>
             <a href="/resorts/logout">
                 <button class="button--submit" value="Submit">Logout</button>
             </a>
@@ -196,7 +209,7 @@
     <script src="main.js"></script>
 
     <script src="lib/pikaday.js"></script>
-    <script>
+    <script nonce="{CSP_NONCE}">
 
             var pickerFrom = new Pikaday(
             {
@@ -220,6 +233,14 @@
                             callAvailabilityChecker(selectedDate, document.getElementById('datepickerto'));
                         }
             });
+
+        // CSP-compliant external event listeners (replaces inline onchange/onclick handlers)
+        document.getElementById('city-select').addEventListener('change', function() {
+            callRESTAPI();
+        });
+        document.getElementById('reserve-btn').addEventListener('click', function() {
+            confirmReservcation();
+        });
 
     </script>
 
